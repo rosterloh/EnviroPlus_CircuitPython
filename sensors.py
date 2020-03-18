@@ -6,6 +6,7 @@ from digitalio import DigitalInOut
 import adafruit_bme280
 import adafruit_logging as logging
 from pms5003 import PMS5003
+from ltr559 import LTR559
 
 WAITING = 0
 READING = 1
@@ -49,6 +50,7 @@ class Sensors:
 
         self.bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
         self.pms5003 = PMS5003(baudrate=9600, pin_enable=board.D5 , pin_reset=board.D6)
+        self.ltr559 = LTR559(i2c_dev=i2c)
 
     def run(self):
         while True:
@@ -82,6 +84,9 @@ class Sensors:
                 self.readings['PM10'] = data.pm_ug_per_m3(10)
             except RuntimeError as err:
                 self.logger.error("{0}".format(err))
+
+            self.ltr559.update_sensor()
+            self.readings['light'] = self.ltr559.get_lux()
 
             self.last_update_time = self.current_time
             self.state = UPDATED
