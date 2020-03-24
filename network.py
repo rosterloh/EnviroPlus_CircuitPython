@@ -54,12 +54,12 @@ class Network():
 
         self.wifi.connect()
 
-        self.mqtt_client = MQTT(socket,
-                                broker = secrets['broker'],
-                                port = 1883,
+        MQTT.set_socket(socket, esp)
+
+        self.mqtt_client = MQTT(broker = secrets['broker'],
                                 username = secrets['user'],
                                 password = secrets['pass'],
-                                network_manager = self.wifi)
+                                is_ssl = False)
  
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_disconnect = self._on_disconnected
@@ -82,8 +82,8 @@ class Network():
     def _on_message(self, client, topic, message):
         self.logger.debug('New message on topic {0}: {1}'.format(topic, message))
 
-    def create_payload(self, name, unit, value, uid, model, manufacturer, device_class = None):
-         data = {
+    def create_payload(self, name, unit, value, uid, model, manufacturer, device_class=None):
+        data = {
             "name": self.device_name + name,
             "state_topic": "homeassistant/sensor/" + self.device_name + "/state",
             "unit_of_measurement": unit,
@@ -158,5 +158,9 @@ class Network():
             self.wifi.connect()
             
             self.mqtt_client.connect()
+
+            self.mqtt_client.disconnect()
+
+            self.wifi.disconnect()
         else:
             self.logger.warning('No readings, skipping connect')

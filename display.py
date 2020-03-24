@@ -2,34 +2,66 @@ import board
 import displayio
 from adafruit_st7735r import ST7735R
 
-def Display():
+class Display():
     def __init__(
         self,
-        screen_looger=True,
+        backlight_control=True,
+        baudrate=100000000
     ):
         spi = board.SPI()
-        # spi.try_lock()
-        # spi.configure(baudrate=baudrate)
-        # spi.unlock()
+        spi.try_lock()
+        spi.configure(baudrate=baudrate)
+        spi.unlock()
 
         displayio.release_displays()
-    
-        display_bus = displayio.FourWire(spi, command=board.D4, chip_select=board.D0, reset=board.D1)
-        
+
+        if backlight_control:
+            display_bus = displayio.FourWire(spi, command=board.D4, chip_select=board.A5, reset=board.A4)
+        else:
+            display_bus = displayio.FourWire(spi, command=board.D4, chip_select=board.A5)
+
         self.display = ST7735R(display_bus, width=160, height=80, colstart=26, rowstart=1, rotation=270, invert=True)
 
-        self.num_colours = 1
-        self.bg = displayio.Bitmap(160, 80, self.num_colours)
+    def init_plotter(self, colours, bg_colour=None, max_value=None, min_value=None, display=None, top_space=None):
+        self.num_colours = len(colours) + 1
+
+        if top_space:
+            self.bitmap = displayio.Bitmap(160, 80 - top_space, self.num_colours)
+            self.top_offset = top_space
+        else:
+            self.bitmap = displayio.Bitmap(160, 80, self.num_colours)
+            self.top_offset = 0
+        
         self.palette = displayio.Palette(self.num_colours)
-        self.palette[0] = 0x000000 # black
-        self.tile_grid = displayio.TileGrid(self.bitmap, pixel_shader=self.palette)
+
+        if bg_colour:
+            self.palette[0] = bg_colour
+        else:
+            self.palette[0] = 0x000000 # black
+            
+        for i,j in enumerate(colours):
+            self.palette[i+1] = j
+            
+        self.tile_grid = displayio.TileGrid(self.bitmap, pixel_shader=self.palette, y=self.top_offset)
+        
         self.group = displayio.Group(max_size=12)
+        
         self.group.append(self.tile_grid)
+        
         self.display.show(self.group)
 
-        self.max_value = 2**16 - 1 # max 16 bit value (unsigned)
-        self.min_value = 0 # min 16 bit value (unsigned)
+        if max_value:
+            self.max_value = max_value
+        else:
+            self.max_value = 2**16 - 1 # max 16 bit value (unsigned)
+        
+        if min_value:
+            self.min_value = min_value
+        else:
+            self.min_value = 0 # min 16 bit value (unsigned)
+        
         self.value_range = self.max_value - self.min_value
+        
         self.data_points = []
 
     def remap(self, Value, OldMin,OldMax, NewMin, NewMax):
@@ -37,7 +69,7 @@ def Display():
     
     def update(self, *values, draw=True):
         values = list(values)
-
+        
         if len(values) > (self.num_colours - 1):
             raise Exception("The list of values shouldn't have more entries than the list of colours")
         

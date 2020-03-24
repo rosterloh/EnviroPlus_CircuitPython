@@ -13,17 +13,51 @@ READING = 1
 UPDATED = 2
 ERROR = 3
 
+class SensorData():
+    def __init__(self):
+        self.temperature = 0.0
+        self.humidity = 0.0
+        self.pressure = 0.0
+        self.altitiude = 0.0
+        self.pm1 = 0.0
+        self.pm2_5 = 0.0
+        self.pm10 = 0.0
+        self.light = 0.0
+
+    def __repr__(self):
+        fmt = """
+Temperature: {temp:.02f} C
+Humidity:    {hum:.02f} %
+Pressure:    {pres:.02f} hPa
+Altitude:    {alt:.02f} m
+PM1.0:       {p1:.02f} ug/m3
+PM2.5:       {p2:.02f} ug/m3
+PM10:        {p10:.02f} ug/m3
+Light:       {lux:.02f} lux
+"""
+        return fmt.format(
+            temp=self.temperature,
+            hum=self.humidity,
+            pres=self.pressure,
+            alt=self.altitiude,
+            p1=self.pm1,
+            p2=self.pm2_5,
+            p10=self.pm10,
+            lux=self.light)
+
+    __str__ = __repr__
+
 class Sensors:
     def __init__(
         self,
-        update_timeout = 2.0,
+        update_timeout=2.0,
         debug=False
     ):
         self.current_time = time.monotonic()
         self.logger = logging.getLogger('enviro+')
         self.state = WAITING
         self.prev_state = self.state
-        self.readings = {}
+        self.readings = SensorData()
         self.update_timeout = update_timeout
         self.last_update_time = 0
         self.debug = debug
@@ -43,12 +77,13 @@ class Sensors:
         i2c.unlock()
 
     def _init_sensors(self):
-        i2c = I2C(board.SCL, board.SDA)
+        i2c = board.I2C()
         
         if self.debug:
             self._scan_bus(i2c)
 
         self.bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
+        self.bme280.sea_level_pressure = 1026
         self.pms5003 = PMS5003(baudrate=9600, pin_enable=board.D5 , pin_reset=board.D6)
         self.ltr559 = LTR559(i2c_dev=i2c)
 
@@ -70,23 +105,26 @@ class Sensors:
         if self.state == UPDATED:
             self.state = WAITING
             
-            self.readings = {}
+            self.readings = SensorData()
 
         elif self.state == READING:
-            self.readings['temperature'] = self.bme280.temperature
-            self.readings['humidity'] = self.bme280.humidity
-            self.readings['pressure'] = self.bme280.pressure
-            self.readings['altitiude'] = self.bme280.altitude
+            self.readings.temperature = self.bme280.temperature
+            self.readings.humidity = self.bme280.humidity
+            self.readings.pressure = self.bme280.pressure
+            self.readings.altitiude = self.bme280.altitude
             try:
                 data = self.pms5003.read()
-                self.readings['PM1.0'] = data.pm_ug_per_m3(1.0)
-                self.readings['PM2.5'] = data.pm_ug_per_m3(2.5)
-                self.readings['PM10'] = data.pm_ug_per_m3(10)
+                self.readings.pm1 = data.pm_ug_per_m3(1.0)
+                self.readings.pm2_5 = data.pm_ug_per_m3(2.5)
+                self.readings.pm10 = data.pm_ug_per_m3(10)
             except RuntimeError as err:
                 self.logger.error("{0}".format(err))
 
             self.ltr559.update_sensor()
-            self.readings['light'] = self.ltr559.get_lux()
+            self.readings.light = self.ltr559.get_lux()
+
+            if self.debug:
+                print(self.readings)
 
             self.last_update_time = self.current_time
             self.state = UPDATED
