@@ -1,16 +1,21 @@
+import board 
+from neopixel import NeoPixel
 from adafruit_display_text import label
 import terminalio
 
 from sensors import Sensors
-# from network import Network
+from network_service import NetworkService
 from display import Display
 
 red = 0xFF0000
 green = 0x00FF00
 blue = 0x0000FF
 
-lcd = Display(backlight_control=False)
-# nw = Network()
+neo = NeoPixel(board.NEOPIXEL, 1, brightness=0.2)
+neo.fill(0)
+
+lcd = Display(backlight_control=True, baudrate=8000000)
+nws = NetworkService()
 sns = Sensors(update_timeout=30.0, debug=True)
 
 lcd.init_plotter([red, green, blue, red+green+blue], max_value=70, min_value=0, top_space=10)

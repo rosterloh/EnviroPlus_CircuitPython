@@ -2,11 +2,12 @@ import board
 import displayio
 from adafruit_st7735r import ST7735R
 
-class Display():
+class Display:
     def __init__(
         self,
         backlight_control=True,
-        baudrate=100000000
+        baudrate=100000000,
+        debug=False
     ):
         spi = board.SPI()
         spi.try_lock()
@@ -16,11 +17,11 @@ class Display():
         displayio.release_displays()
 
         if backlight_control:
-            display_bus = displayio.FourWire(spi, command=board.D4, chip_select=board.A5, reset=board.A4)
+            display_bus = displayio.FourWire(spi, command=board.D4, chip_select=board.A5, reset=board.D9, baudrate=baudrate)
         else:
-            display_bus = displayio.FourWire(spi, command=board.D4, chip_select=board.A5)
+            display_bus = displayio.FourWire(spi, command=board.D4, chip_select=board.A5, baudrate=baudrate)
 
-        self.display = ST7735R(display_bus, width=160, height=80, colstart=26, rowstart=1, rotation=270, invert=True)
+        self.display = ST7735R(display_bus, width=160, height=80, colstart=26, rowstart=1, rotation=270, invert=True) #bgr=True
 
     def init_plotter(self, colours, bg_colour=None, max_value=None, min_value=None, display=None, top_space=None):
         self.num_colours = len(colours) + 1
