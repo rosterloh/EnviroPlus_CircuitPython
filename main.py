@@ -1,41 +1,42 @@
 import board 
-from neopixel import NeoPixel
 from adafruit_display_text import label
 import terminalio
 
+from led_status import LedStatus
 from sensors import Sensors
 from network_service import NetworkService
 from display import Display
+from plotter import Plotter
 
-red = 0xFF0000
-green = 0x00FF00
-blue = 0x0000FF
-
-neo = NeoPixel(board.NEOPIXEL, 1, brightness=0.2)
-neo.fill(0)
-
+led = LedStatus()
 lcd = Display(backlight_control=True, baudrate=8000000)
 nws = NetworkService()
 sns = Sensors(update_timeout=30.0, debug=True)
 
-lcd.init_plotter([red, green, blue, red+green+blue], max_value=70, min_value=0, top_space=10)
-lcd.group.append(label.Label(terminalio.FONT, text="{:0.1f} C".format(0), color=red, x=0, y=5, max_glyphs=15))
-lcd.group.append(label.Label(terminalio.FONT, text="{:0.1f} ppm".format(0), color=green, x=50, y=5, max_glyphs=15))
-lcd.group.append(label.Label(terminalio.FONT, text="{:0.1f} %".format(0), color=blue, x=120, y=5, max_glyphs=15))
+plotter = Plotter(lcd,
+                  style="lines", #"dots"
+                  mode="scroll", #"wrap"
+                  screen_width=160, screen_height=80,
+                  plot_width=112, plot_height=41)
+
+plotter.display_on()
+plotter.clear_all()
+plotter.title = "Enviro+"
+plotter.y_axis_lab = ""
+# The range on graph will start at this value
+plotter.y_range = (20, 60)
+plotter.y_min_range = 1
+# Sensor/data source is expected to produce data between these values
+plotter.y_full_range = (0, 100)
+plotter.channels = 3  # Can be between 1 and 3
+plotter.channel_colidx = [0xffff00, 0x00ffff, 0xff0080]
 
 @sns.on_update
 def on_update(readings):
-    lcd.update(
-        # scale to 70 as that's the number of pixels height available
-        lcd.remap(readings.temperature, 0, 50, 0, 70),
-        lcd.remap(readings.pm10, 975, 1025, 0, 70),
-        lcd.remap(readings.humidity, 0, 100, 0, 70),
-    )
-    # update the labels
-    lcd.group[1].text = "{:0.1f} C".format(readings.temperature)
-    lcd.group[2].text = "{:0.1f} ug/m3".format(readings.pm10)
-    lcd.group[3].text = "{:0.1f} %".format(readings.humidity)
-
+    led.show_air_quality(int(readings.pm2_5))
+    lcd.update(readings)
+    # plotter.data_add((readings.temperature, readings.pm2_5, readings.humidity))
     # nw.connect_and_send(readings)
 
-sns.run()
+while True:
+    sns.run()

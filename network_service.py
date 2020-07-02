@@ -39,6 +39,12 @@ class NetworkService:
         self.logger = logging.getLogger('enviro+')
         self.device_name = device_name 
         self.debug = debug
+        self.connected = False
+
+        if self.debug:
+            self.logger.set_logger_level("DEBUG")
+        else:
+            self.logger.set_logger_level("INFO")
 
         self._setup_wifi()
 
@@ -89,8 +95,10 @@ class NetworkService:
         # self.mqtt_client = MQTT.MQTT(broker=secrets['broker'],
         #                              username=secrets['user'],
         #                              password=secrets['pass'],
-        #                              is_ssl=False,
-        #                              log=True)
+        #                              is_ssl=False)
+
+        if self.debug:
+            self.mqtt_client.set_logger_level("DEBUG")
  
         # self.mqtt_client.on_message = self._on_message
         # self.mqtt_client.on_connect = self._on_connect
@@ -108,9 +116,12 @@ class NetworkService:
     
     def _on_connect(self, client, userdata, flags, rc):
         self.logger.debug('CONNECT: Flags: {0} RC: {1}'.format(flags, rc))
+        if rc == 0:
+            self.connected = True
     
     def _on_disconnected(self, client, userdata, rc):
         self.logger.debug('DISCONNECT: RC: {0}'.format(rc))
+        self._connected = False
 
     def _on_publish(self, client, userdata, topic, pid):
         self.logger.debug('PUBLISH: {0} PID: {1}'.format(topic, pid))

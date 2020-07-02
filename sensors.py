@@ -1,17 +1,19 @@
 import board
 import time
-from busio import I2C
-from digitalio import DigitalInOut
+from digitalio import DigitalInOut, Direction
+from analogio import AnalogIn
 
-import adafruit_bme280
 import adafruit_logging as logging
-from pms5003 import PMS5003
+from adafruit_bme280 import Adafruit_BME280_I2C
+from adafruit_pm25 import PM25_UART
+from adafruit_sgp30 import Adafruit_SGP30
 from ltr559 import LTR559
 
 WAITING = 0
 READING = 1
 UPDATED = 2
-ERROR = 3
+CALIBRATING = 3
+ERROR = 4
 
 class SensorData():
     def __init__(self):
@@ -22,7 +24,10 @@ class SensorData():
         self.pm1 = 0.0
         self.pm2_5 = 0.0
         self.pm10 = 0.0
+        self.eco2 = 0
+        self.tvoc = 0
         self.light = 0.0
+        self.battery_voltage = 0
 
     def __repr__(self):
         fmt = """
@@ -33,7 +38,10 @@ Altitude:    {alt:.02f} m
 PM1.0:       {p1:.02f} ug/m3
 PM2.5:       {p2:.02f} ug/m3
 PM10:        {p10:.02f} ug/m3
+eCO2:        {co2:d} ppm
+TVOC:        {voc:d} ppb
 Light:       {lux:.02f} lux
+Battery:     {bat:d} mV
 """
         return fmt.format(
             temp=self.temperature,
@@ -43,7 +51,10 @@ Light:       {lux:.02f} lux
             p1=self.pm1,
             p2=self.pm2_5,
             p10=self.pm10,
-            lux=self.light)
+            co2=self.eco2,
+            voc=self.tvoc,
+            lux=self.light,
+            bat=self.battery_voltage)
 
     __str__ = __repr__
 
@@ -59,7 +70,9 @@ class Sensors:
         self.prev_state = self.state
         self.readings = SensorData()
         self.update_timeout = update_timeout
+        self.calibration_timeout = 30.0 * 60
         self.last_update_time = 0
+        self.last_calibration_time = 0
         self.debug = debug
 
         # callbacks
@@ -71,7 +84,8 @@ class Sensors:
         while not i2c.try_lock():
             pass
 
-        self.logger.debug("I2C addresses found: {}".format([hex(device_address)
+        if self.debug:
+            self.logger.debug("I2C addresses found: {}".format([hex(device_address)
                                    for device_address in i2c.scan()]))
 
         i2c.unlock()
@@ -82,17 +96,39 @@ class Sensors:
         if self.debug:
             self._scan_bus(i2c)
 
-        self.bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
+        self.bme280 = Adafruit_BME280_I2C(i2c, address=0x76)
         self.bme280.sea_level_pressure = 1026
-        self.pms5003 = PMS5003(baudrate=9600, pin_enable=board.D5 , pin_reset=board.D6)
+
+        try:
+            self.sgp30 = Adafruit_SGP30(i2c)
+            self.sgp30.iaq_init()
+            self.sgp30.set_iaq_baseline(0x8973, 0x8AAE)
+        except ValueError as err: 
+            self.logger.warning("SGP30 not found")
+            self.sgp30 = None
+
+        # self._pm_reset = DigitalInOut(board.D6)
+        # self._pm_enable = DigitalInOut(board.D5)
+        # self._pm_enable.direction = Direction.OUTPUT
+        # self._pm_enable.value = True
+
+        # uart = board.UART()
+        # uart.baudrate = 9600
+        # uart.timeout = 4
+
+        # self.pms5003 = PM25_UART(uart, self._pm_reset)
+        self.pms5003 = None
+        
         self.ltr559 = LTR559(i2c_dev=i2c)
 
+        self.battery = AnalogIn(board.VOLTAGE_MONITOR)
+        self.divider_ratio = 2
+
     def run(self):
-        while True:
-            self.current_time = time.monotonic()
-            self._update_values()
-            self._notify_callbacks()
-            # self._update_display()
+        self.current_time = time.monotonic()
+        self._update_values()
+        self._notify_callbacks()
+        # self._update_display()
 
     def on_update(self, func):
         self.add_on_update(func)
@@ -112,16 +148,30 @@ class Sensors:
             self.readings.humidity = self.bme280.humidity
             self.readings.pressure = self.bme280.pressure
             self.readings.altitiude = self.bme280.altitude
-            try:
-                data = self.pms5003.read()
-                self.readings.pm1 = data.pm_ug_per_m3(1.0)
-                self.readings.pm2_5 = data.pm_ug_per_m3(2.5)
-                self.readings.pm10 = data.pm_ug_per_m3(10)
-            except RuntimeError as err:
-                self.logger.error("{0}".format(err))
-
+            
+            if self.pms5003:
+                try:
+                    data = self.pms5003.read()
+                    self.readings.pm1 = data["pm10 env"]
+                    self.readings.pm2_5 = data["pm25 env"]
+                    self.readings.pm10 = data["pm100 env"]
+                except RuntimeError as err:
+                    self.logger.error("{0}".format(err))
+            
+            if self.sgp30:
+                self.readings.eco2 = self.sgp30.eCO2
+                self.readings.tvoc = self.sgp30.TVOC
+            
             self.ltr559.update_sensor()
             self.readings.light = self.ltr559.get_lux()
+
+            battery_voltage = (
+                self.battery.value
+                / 2 ** 16
+                * self.divider_ratio
+                * self.battery.reference_voltage  # pylint: disable=no-member
+            )
+            self.readings.battery_voltage = int(battery_voltage * 1000)
 
             if self.debug:
                 print(self.readings)
@@ -129,10 +179,22 @@ class Sensors:
             self.last_update_time = self.current_time
             self.state = UPDATED
 
+        elif self.state == CALIBRATING:
+            if self.sgp30:
+                print(
+                    "**** Baseline values: eCO2 = 0x%x, TVOC = 0x%x"
+                    % (sgp30.baseline_eCO2, sgp30.baseline_TVOC)
+                )
+            self.last_calibration_time = self.current_time
+            self.state = WAITING
+
         elif self.state == WAITING:
             update_elapsed = self.current_time - self.last_update_time
+            calibrate_elapsed = self.current_time - self.last_calibration_time
             if update_elapsed > self.update_timeout:
                 self.state = READING
+            elif calibrate_elapsed > self.calibration_timeout:
+                self.state = CALIBRATING
 
     def _notify_callbacks(self):
         state_changed = self.prev_state != self.state
